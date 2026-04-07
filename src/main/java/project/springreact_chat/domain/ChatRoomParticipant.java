@@ -32,4 +32,11 @@ public class ChatRoomParticipant {
 
     @CreatedDate
     private LocalDateTime joinedAt;
+
+    public static ChatRoomParticipant create(Member member, ChatRoom chatRoom) {
+        ChatRoomParticipant c = new ChatRoomParticipant();
+        c.member = member;
+        c.chatRoom = chatRoom;
+        return c;
+    }
 }
