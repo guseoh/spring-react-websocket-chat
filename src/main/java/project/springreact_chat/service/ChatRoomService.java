@@ -9,6 +9,7 @@ import project.springreact_chat.domain.Member;
 import project.springreact_chat.dto.ChatMessageResponse;
 import project.springreact_chat.dto.ChatRoomCreateRequest;
 import project.springreact_chat.dto.ChatRoomResponse;
+import project.springreact_chat.repository.ChatMessageRepository;
 import project.springreact_chat.repository.ChatRoomParticipantRepository;
 import project.springreact_chat.repository.ChatRoomRepository;
 import project.springreact_chat.repository.MemberRepository;
@@ -22,6 +23,7 @@ public class ChatRoomService {
     private final ChatRoomRepository chatRoomRepository;
     private final MemberRepository memberRepository;
     private final ChatRoomParticipantRepository chatRoomParticipantRepository;
+    private final ChatMessageRepository chatMessageRepository;
 
 
     public ChatRoomResponse createRoom(ChatRoomCreateRequest request) {
@@ -68,6 +70,8 @@ public class ChatRoomService {
             throw new IllegalArgumentException("해당 방이 존재하지 않습니다.");
         }
 
-        return c
+        return chatMessageRepository.findAllByChatRoomIdOrderByCreatedAtAsc(roomId).stream()
+                .map(ChatMessageResponse::from)
+                .toList();
     }
 }
