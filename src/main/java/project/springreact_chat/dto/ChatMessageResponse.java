@@ -17,9 +17,17 @@ public class ChatMessageResponse {
     private String content;
     private LocalDateTime createdAt;
 
+
+    //todo: 수정 필요
     public static ChatMessageResponse from(ChatMessage chatMessage) {
         return ChatMessageResponse.builder()
                 .messageId(chatMessage.getId())
+                .senderId(chatMessage.getSender().getId())
+                .roomId(chatMessage.getChatRoom().getId())
+                .nickname(chatMessage.getSender().getNickname())
+                .content(chatMessage.getContent())
+                .createdAt(chatMessage.getCreatedAt())
+                .build();
     }
 
 }
