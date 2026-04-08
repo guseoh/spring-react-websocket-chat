@@ -1,6 +1,7 @@
 package project.springreact_chat.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.socket.CloseStatus;
@@ -8,7 +9,6 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import project.springreact_chat.domain.ChatMessage;
 import project.springreact_chat.domain.ChatRoom;
-import project.springreact_chat.domain.ChatRoomParticipant;
 import project.springreact_chat.domain.Member;
 import project.springreact_chat.dto.ChatSocketRequest;
 import project.springreact_chat.dto.ChatSocketResponse;
@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ChatWebSocketService {
 
     private final ChatRoomRepository chatRoomRepository;
@@ -51,28 +52,38 @@ public class ChatWebSocketService {
         Long roomId = (Long) session.getAttributes().get("roomId");
         Long memberId = (Long) session.getAttributes().get("memberId");
 
+        log.info("웹소켓 연결 요청 - sessionId={}, roomId={}, memberId={}", session.getId(), roomId, memberId);
+
         validateJoin(roomId, memberId);
 
         roomSessions.computeIfAbsent(roomId, key -> ConcurrentHashMap.newKeySet())
                 .add(session);
 
         sessionInfoMap.put(session.getId(), new SessionInfo(roomId, memberId));
+
+        log.info("웹소켓 연결 완료 - sessionId={}, roomId={}, memberId={}", session.getId(), roomId, memberId);
     }
 
     @Transactional
     public void handleMessage(WebSocketSession session, String payload) throws IOException {
+        log.info("메시지 처리 시작 - sessionId={}, palload={}", session.getId(), payload);
+
         SessionInfo sessionInfo = sessionInfoMap.get(session.getId());
 
         if (sessionInfo == null) {
             if (session.isOpen()) {
                 session.close(CloseStatus.POLICY_VIOLATION);
+                log.warn("세션 종료 - sessionId={}", session.getId());
             }
             return;
         }
 
         ChatSocketRequest request = objectMapper.readValue(payload, ChatSocketRequest.class);
 
+        log.info("메시지 파싱 완료 - sessionId={}, content={}", session.getId(), request.getContent());
+
         if (request.getContent() == null || request.getContent().isBlank()) {
+            log.warn("빈 메시지 수신 - sessionId={}", session.getId());
             return;
         }
 
@@ -111,7 +122,7 @@ public class ChatWebSocketService {
         }
 
         Set<WebSocketSession> sessions = roomSessions.get(sessionInfo.roomId());
-        if (session == null) {
+        if (sessions == null) {
             return;
         }
 
