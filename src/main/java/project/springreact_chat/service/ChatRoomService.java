@@ -1,6 +1,7 @@
 package project.springreact_chat.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import project.springreact_chat.domain.ChatMessage;
 import project.springreact_chat.domain.ChatRoom;
@@ -18,6 +19,7 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ChatRoomService {
 
     private final ChatRoomRepository chatRoomRepository;

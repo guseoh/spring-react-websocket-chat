@@ -28,6 +28,8 @@ public class ChatController {
     @PostMapping
     public ResponseEntity<ChatRoomResponse> createRoom(@RequestBody ChatRoomCreateRequest request) {
         ChatRoomResponse response = service.createRoom(request);
+
+        log.info("채팅방이 생성되었습니다: {}", request.getRoomName());
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -40,6 +42,7 @@ public class ChatController {
     // 한개 방 조회
     @GetMapping("/{roomId}")
     public ResponseEntity<ChatRoomResponse> getRoom(@PathVariable Long roomId) {
+        log.info("한 개의 방 조회: {}", roomId);
         return ResponseEntity.ok(service.getRoom(roomId));
     }
 
@@ -47,6 +50,7 @@ public class ChatController {
     @PostMapping("/{roomId}/participants")
     public ResponseEntity<Void> joinRoom(@PathVariable Long roomId, @RequestBody ChatRoomParticipantRequest request) {
         service.joinRoom(request.getMemberId(), roomId);
+        log.info("{} 방에 입장하였습니다.", roomId);
         return ResponseEntity.ok().build();
     }
 
