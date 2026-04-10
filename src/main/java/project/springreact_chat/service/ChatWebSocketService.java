@@ -66,7 +66,7 @@ public class ChatWebSocketService {
 
     @Transactional
     public void handleMessage(WebSocketSession session, String payload) throws IOException {
-        log.info("메시지 처리 시작 - sessionId={}, palload={}", session.getId(), payload);
+        log.info("메시지 처리 시작 - sessionId={}, payload={}", session.getId(), payload);
 
         SessionInfo sessionInfo = sessionInfoMap.get(session.getId());
 
@@ -133,13 +133,19 @@ public class ChatWebSocketService {
         }
     }
 
+    /*
+        순수 웹소켓에서의 브로드캐스트
+        1. 방에 연결된 세션 목록을 찾고
+        2. 그 세션들을 하나씩 돌면서
+        3. 같은 메시지를 전송
+     */
     private void broadcast(Long roomId, ChatSocketResponse response) throws IOException {
-        Set<WebSocketSession> sessions = roomSessions.getOrDefault(roomId, Set.of());
+        Set<WebSocketSession> sessions = roomSessions.getOrDefault(roomId, Set.of());   // 1
         String json = objectMapper.writeValueAsString(response);
 
-        for (WebSocketSession webSocketSession : sessions) {
+        for (WebSocketSession webSocketSession : sessions) {                            // 2
             if (webSocketSession.isOpen()) {
-                webSocketSession.sendMessage(new TextMessage(json));
+                webSocketSession.sendMessage(new TextMessage(json));                    // 3
             }
         }
     }
