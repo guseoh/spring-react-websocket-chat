@@ -29,7 +29,7 @@ public class Member {
     @Column(nullable = false)
     private String nickname;
 
-    @Column(nullable = false)
+//    @Column(nullable = false)
     private String password;
 
     @CreatedDate
@@ -37,5 +37,12 @@ public class Member {
 
     @LastModifiedDate
     private LocalDateTime updatedAt;
+
+    public static Member create(String email, String nickname) {
+        Member member = new Member();
+        member.email = email;
+        member.nickname = nickname;
+        return member;
+    }
 
 }

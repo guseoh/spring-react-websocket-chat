@@ -33,4 +33,10 @@ public class ChatRoom {
 
     @LastModifiedDate
     private LocalDateTime updatedAt;
+
+    public static ChatRoom create(String roomName) {
+        ChatRoom chatRoom = new ChatRoom();
+        chatRoom.roomName = roomName;
+        return chatRoom;
+    }
 }
