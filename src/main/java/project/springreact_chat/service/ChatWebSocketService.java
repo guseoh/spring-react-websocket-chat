@@ -105,9 +105,9 @@ public class ChatWebSocketService {
         ChatMessage saved = chatMessageRepository.save(chatMessage);
 
         ChatSocketResponse response = ChatSocketResponse.builder()
-                .roomId(roomId).
-                senderId(member.getId())
-                .nickname(member.getNickname())
+                .roomId(roomId)
+                .senderId(member.getId())
+                .username(member.getUsername())
                 .content(saved.getContent())
                 .createdAt(saved.getCreatedAt())
                 .build();
