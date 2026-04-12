@@ -11,7 +11,7 @@ public class ChatSocketResponse {
 
     private Long roomId;
     private Long senderId;
-    private String nickname;
+    private String username;
     private String content;
     private LocalDateTime createdAt;
 
