@@ -13,7 +13,6 @@ export default function App() {
                 <Route path="/chat/:roomId" element={<ChatRoomPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
-
             </Routes>
         </BrowserRouter>
     );

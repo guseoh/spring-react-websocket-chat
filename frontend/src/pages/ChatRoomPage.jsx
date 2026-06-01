@@ -24,8 +24,24 @@ function createChatSocketUrl(roomId, memberId) {
     return url.toString();
 }
 
-function isSystemMessage(message) {
-    return message.type && message.type !== "TALK";
+function isTalkMessage(message) {
+    return !message.type || message.type === "TALK";
+}
+
+function formatTime(value) {
+    if (!value) {
+        return "";
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat("ko-KR", {
+        hour: "2-digit",
+        minute: "2-digit",
+    }).format(date);
 }
 
 export default function ChatRoomPage() {
@@ -172,89 +188,111 @@ export default function ChatRoomPage() {
     };
 
     const handleKeyDown = (e) => {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
             sendMessage();
         }
     };
 
     if (loading) {
-        return <div style={{padding: 20}}>채팅방 불러오는 중...</div>;
+        return (
+            <main className="chat-shell">
+                <div className="state-panel chat-state">
+                    <div className="spinner" aria-hidden="true"/>
+                    <strong>채팅방을 준비하고 있습니다.</strong>
+                    <p>이전 메시지와 WebSocket 연결을 확인하는 중입니다.</p>
+                </div>
+            </main>
+        );
     }
 
     if (error) {
         return (
-            <div style={{padding: 20}}>
-                <p style={{color: "red"}}>{error}</p>
-                <Link to="/chat">채팅방 목록으로 돌아가기</Link>
-            </div>
+            <main className="chat-shell">
+                <div className="state-panel error-panel chat-state">
+                    <strong>채팅방을 열 수 없습니다.</strong>
+                    <p>{error}</p>
+                    <Link className="button secondary" to="/chat">채팅방 목록으로</Link>
+                </div>
+            </main>
         );
     }
 
     return (
-        <div style={{maxWidth: 900, margin: "20px auto", padding: 20}}>
-            <div style={{marginBottom: 16}}>
-                <Link to="/chat">← 채팅방 목록</Link>
-            </div>
+        <main className="chat-shell">
+            <section className="chat-layout" aria-label="채팅방">
+                <header className="chat-header">
+                    <div>
+                        <Link className="back-link" to="/chat">채팅방 목록</Link>
+                        <h1>{room?.roomName || `Room #${roomId}`}</h1>
+                        <p>Room #{roomId} · 내 ID {memberId}</p>
+                    </div>
 
-            <h2 style={{marginBottom: 16}}>
-                {room?.roomName || `Room #${roomId}`}
-            </h2>
+                    <div className={`connection-badge ${socketStatus.toLowerCase()}`}>
+                        <span aria-hidden="true"/>
+                        {CONNECTION_LABEL[socketStatus]}
+                    </div>
+                </header>
 
-            <div style={{fontSize: 14, marginBottom: 12, color: socketStatus === SOCKET_STATUS.OPEN ? "#2f7d32" : "#9a5b00"}}>
-                {CONNECTION_LABEL[socketStatus]}
-                {socketError && <span style={{marginLeft: 8, color: "red"}}>{socketError}</span>}
-            </div>
-
-            <div
-                style={{
-                    border: "1px solid #ddd",
-                    height: 400,
-                    overflowY: "auto",
-                    padding: 16,
-                    marginBottom: 12,
-                    borderRadius: 8,
-                }}
-            >
-                {messages.length === 0 ? (
-                    <p>아직 메시지가 없습니다.</p>
-                ) : (
-                    messages.map((msg, idx) => (
-                        <div
-                            key={`${msg.messageId ?? msg.createdAt ?? idx}-${idx}`}
-                            style={{
-                                marginBottom: 12,
-                                paddingBottom: 8,
-                                borderBottom: "1px solid #f1f1f1",
-                                color: isSystemMessage(msg) ? "#666" : "inherit",
-                            }}
-                        >
-                            <div style={{fontWeight: "bold"}}>
-                                {isSystemMessage(msg) ? "시스템" : `${msg.username || "알 수 없음"} (${msg.senderId})`}
-                            </div>
-                            <div>{msg.content}</div>
-                            {msg.createdAt && (
-                                <div style={{fontSize: 12, color: "#666", marginTop: 4}}>
-                                    {msg.createdAt}
-                                </div>
-                            )}
-                        </div>
-                    ))
+                {socketError && (
+                    <div className="socket-alert" role="status">
+                        {socketError}
+                    </div>
                 )}
-                <div ref={messageEndRef}/>
-            </div>
 
-            <div style={{display: "flex", gap: 8}}>
-                <input
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="메시지 입력"
-                    style={{flex: 1, padding: 12}}
-                />
-                <button onClick={sendMessage} disabled={socketStatus !== SOCKET_STATUS.OPEN}>
-                    전송
-                </button>
-            </div>
-        </div>
+                <div className="message-list" aria-live="polite">
+                    {messages.length === 0 ? (
+                        <div className="empty-chat">
+                            <strong>아직 메시지가 없습니다.</strong>
+                            <p>첫 메시지를 보내 대화를 시작하세요.</p>
+                        </div>
+                    ) : (
+                        messages.map((msg, idx) => {
+                            const systemMessage = !isTalkMessage(msg);
+                            const mine = isTalkMessage(msg) && Number(msg.senderId) === Number(memberId);
+                            const itemClassName = [
+                                "message-row",
+                                systemMessage ? "system" : "",
+                                mine ? "mine" : "other",
+                            ].filter(Boolean).join(" ");
+
+                            return (
+                                <article className={itemClassName} key={`${msg.messageId ?? msg.createdAt ?? idx}-${idx}`}>
+                                    {systemMessage ? (
+                                        <div className="system-message">{msg.content}</div>
+                                    ) : (
+                                        <div className="message-bubble">
+                                            <div className="message-meta">
+                                                <span>{mine ? "나" : msg.username || "알 수 없음"}</span>
+                                                {msg.createdAt && <time>{formatTime(msg.createdAt)}</time>}
+                                            </div>
+                                            <p>{msg.content}</p>
+                                        </div>
+                                    )}
+                                </article>
+                            );
+                        })
+                    )}
+                    <div ref={messageEndRef}/>
+                </div>
+
+                <form className="message-composer" onSubmit={(e) => {
+                    e.preventDefault();
+                    sendMessage();
+                }}>
+                    <textarea
+                        value={content}
+                        onChange={(e) => setContent(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="메시지를 입력하세요"
+                        rows={1}
+                        maxLength={500}
+                    />
+                    <button type="submit" className="button primary" disabled={socketStatus !== SOCKET_STATUS.OPEN || !content.trim()}>
+                        전송
+                    </button>
+                </form>
+            </section>
+        </main>
     );
 }
