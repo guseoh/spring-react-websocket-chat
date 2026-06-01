@@ -3,6 +3,7 @@ package project.springreact_chat.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import project.springreact_chat.domain.ChatMessage;
 import project.springreact_chat.domain.ChatRoom;
 import project.springreact_chat.domain.ChatRoomParticipant;
@@ -20,6 +21,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Transactional(readOnly = true)
 public class ChatRoomService {
 
     private final ChatRoomRepository chatRoomRepository;
@@ -28,15 +30,16 @@ public class ChatRoomService {
     private final ChatMessageRepository chatMessageRepository;
 
 
+    @Transactional
     public ChatRoomResponse createRoom(ChatRoomCreateRequest request) {
         ChatRoom chatRoom = ChatRoom.builder()
-                .roomName(request.getRoomName())
+                .roomName(request.getRoomName().trim())
                 .roomType(request.getRoomType())
                 .build();
 
         ChatRoom saved = chatRoomRepository.save(chatRoom);
 
-        return ChatRoomResponse.from(chatRoom);
+        return ChatRoomResponse.from(saved);
     }
 
     public List<ChatRoomResponse> getRooms() {
@@ -51,6 +54,7 @@ public class ChatRoomService {
         return ChatRoomResponse.from(chatRoom);
     }
 
+    @Transactional
     public void joinRoom(Long memberId, Long roomId) {
         ChatRoom chatRoom = chatRoomRepository.findById(roomId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 방이 존재하지 않습니다."));

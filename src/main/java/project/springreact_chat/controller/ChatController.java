@@ -1,6 +1,7 @@
 package project.springreact_chat.controller;
 
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -11,9 +12,7 @@ import project.springreact_chat.dto.ChatRoomCreateRequest;
 import project.springreact_chat.dto.ChatRoomParticipantRequest;
 import project.springreact_chat.dto.ChatRoomResponse;
 import project.springreact_chat.service.ChatRoomService;
-import project.springreact_chat.service.ChatWebSocketService;
 
-import java.lang.invoke.CallSite;
 import java.util.List;
 
 @RestController
@@ -26,7 +25,7 @@ public class ChatController {
 
     // 방 생성
     @PostMapping
-    public ResponseEntity<ChatRoomResponse> createRoom(@RequestBody ChatRoomCreateRequest request) {
+    public ResponseEntity<ChatRoomResponse> createRoom(@Valid @RequestBody ChatRoomCreateRequest request) {
         ChatRoomResponse response = service.createRoom(request);
 
         log.info("채팅방이 생성되었습니다: {}", request.getRoomName());
@@ -48,7 +47,7 @@ public class ChatController {
 
     // 방 입장
     @PostMapping("/{roomId}/participants")
-    public ResponseEntity<Void> joinRoom(@PathVariable Long roomId, @RequestBody ChatRoomParticipantRequest request) {
+    public ResponseEntity<Void> joinRoom(@PathVariable Long roomId, @Valid @RequestBody ChatRoomParticipantRequest request) {
         service.joinRoom(request.getMemberId(), roomId);
         log.info("{} 방에 입장하였습니다.", roomId);
         return ResponseEntity.ok().build();

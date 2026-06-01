@@ -17,30 +17,55 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ChatWebSocketService chatWebSocketService;
 
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+    public void afterConnectionEstablished(WebSocketSession session) {
         log.info("웹소켓 연결 시작 - sessionId={}", session.getId());
-        chatWebSocketService.connect(session);
+
+        try {
+            chatWebSocketService.connect(session);
+        } catch (IllegalArgumentException e) {
+            log.warn("웹소켓 연결 거부 - sessionId={}, reason={}", session.getId(), e.getMessage());
+            closeSession(session, CloseStatus.POLICY_VIOLATION);
+        } catch (RuntimeException e) {
+            log.error("웹소켓 연결 처리 실패 - sessionId={}", session.getId(), e);
+            closeSession(session, CloseStatus.SERVER_ERROR);
+        }
     }
 
     @Override
-    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         log.info("웹소켓 연결 종료 - sessionId={}. code={}, reason={}",
                 session.getId(), status.getCode(), status.getReason());
         chatWebSocketService.disconnect(session);
     }
 
     @Override
-    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        log.info("메시지 수신 - sessionId={}, payload={}", session.getId(), message.getPayload());
-        chatWebSocketService.handleMessage(session, message.getPayload());
+    protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+        log.debug("메시지 수신 - sessionId={}", session.getId());
+
+        try {
+            chatWebSocketService.handleMessage(session, message.getPayload());
+        } catch (RuntimeException e) {
+            log.error("웹소켓 메시지 처리 실패 - sessionId={}", session.getId(), e);
+            closeSession(session, CloseStatus.SERVER_ERROR);
+        }
     }
 
     @Override
-    public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+    public void handleTransportError(WebSocketSession session, Throwable exception) {
+        log.warn("웹소켓 전송 오류 - sessionId={}", session.getId(), exception);
         chatWebSocketService.disconnect(session);
+        closeSession(session, CloseStatus.SERVER_ERROR);
+    }
 
-        if (session.isOpen()) {
-            session.close(CloseStatus.SERVER_ERROR);
+    private void closeSession(WebSocketSession session, CloseStatus status) {
+        if (!session.isOpen()) {
+            return;
+        }
+
+        try {
+            session.close(status);
+        } catch (Exception e) {
+            log.warn("웹소켓 세션 종료 실패 - sessionId={}", session.getId(), e);
         }
     }
 }

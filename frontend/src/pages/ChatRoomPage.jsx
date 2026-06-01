@@ -1,71 +1,149 @@
 import {useEffect, useRef, useState} from "react";
 import {Link, useParams} from "react-router-dom";
 import {getChatMessages, getChatRoom, joinChatRoom} from "../api/chatApi";
+import {DEFAULT_MEMBER_ID, WS_BASE_URL} from "../config";
+
+const SOCKET_STATUS = {
+    CONNECTING: "CONNECTING",
+    OPEN: "OPEN",
+    CLOSED: "CLOSED",
+    ERROR: "ERROR",
+};
+
+const CONNECTION_LABEL = {
+    [SOCKET_STATUS.CONNECTING]: "연결 중",
+    [SOCKET_STATUS.OPEN]: "연결됨",
+    [SOCKET_STATUS.CLOSED]: "연결 종료",
+    [SOCKET_STATUS.ERROR]: "연결 오류",
+};
+
+function createChatSocketUrl(roomId, memberId) {
+    const url = new URL("/ws/chat", WS_BASE_URL);
+    url.searchParams.set("roomId", roomId);
+    url.searchParams.set("memberId", memberId);
+    return url.toString();
+}
+
+function isSystemMessage(message) {
+    return message.type && message.type !== "TALK";
+}
 
 export default function ChatRoomPage() {
     const {roomId} = useParams();
-    const memberId = 2;
+    const memberId = DEFAULT_MEMBER_ID;
 
     const [room, setRoom] = useState(null);
     const [content, setContent] = useState("");
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [socketStatus, setSocketStatus] = useState(SOCKET_STATUS.CLOSED);
+    const [socketError, setSocketError] = useState("");
     const socketRef = useRef(null);
     const messageEndRef = useRef(null);
 
     useEffect(() => {
+        let cancelled = false;
+
+        const closeSocket = () => {
+            const socket = socketRef.current;
+            if (!socket) {
+                return;
+            }
+
+            socket.onopen = null;
+            socket.onmessage = null;
+            socket.onerror = null;
+            socket.onclose = null;
+
+            if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+                socket.close(1000, "채팅방 화면 종료");
+            }
+
+            socketRef.current = null;
+        };
+
         const init = async () => {
+            closeSocket();
+
             try {
                 setLoading(true);
                 setError("");
+                setSocketError("");
+                setSocketStatus(SOCKET_STATUS.CONNECTING);
 
                 const roomData = await getChatRoom(roomId);
-                setRoom(roomData);
-
                 await joinChatRoom(roomId, memberId);
-
                 const messageData = await getChatMessages(roomId);
+
+                if (cancelled) {
+                    return;
+                }
+
+                setRoom(roomData);
                 setMessages(messageData);
 
-                const socket = new WebSocket(
-                    `ws://localhost:8080/ws/chat?roomId=${roomId}&memberId=${memberId}`
-                );
+                const socket = new WebSocket(createChatSocketUrl(roomId, memberId));
 
                 socketRef.current = socket;
 
                 socket.onopen = () => {
-                    console.log("websocket connected");
+                    if (cancelled) return;
+                    setSocketStatus(SOCKET_STATUS.OPEN);
+                    setSocketError("");
                 };
 
                 socket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
+                    if (cancelled) return;
+
+                    let data;
+                    try {
+                        data = JSON.parse(event.data);
+                    } catch {
+                        setSocketError("서버 메시지를 해석하지 못했습니다.");
+                        return;
+                    }
+
+                    if (data.type === "ERROR") {
+                        setSocketError(data.content || "메시지 처리 중 오류가 발생했습니다.");
+                        return;
+                    }
+
                     setMessages((prev) => [...prev, data]);
                 };
 
-                socket.onclose = () => {
-                    console.log("websocket closed");
+                socket.onclose = (event) => {
+                    if (cancelled) return;
+                    setSocketStatus(event.code === 1000 ? SOCKET_STATUS.CLOSED : SOCKET_STATUS.ERROR);
+                    if (event.code !== 1000) {
+                        setSocketError("웹소켓 연결이 종료되었습니다.");
+                    }
                 };
 
-                socket.onerror = (event) => {
-                    console.error("websocket error", event);
+                socket.onerror = () => {
+                    if (cancelled) return;
+                    setSocketStatus(SOCKET_STATUS.ERROR);
+                    setSocketError("웹소켓 연결 중 오류가 발생했습니다.");
                 };
             } catch (err) {
-                console.error(err);
-                setError(err.message || "채팅방 초기화 실패");
+                if (!cancelled) {
+                    setError(err.message || "채팅방 초기화 실패");
+                    setSocketStatus(SOCKET_STATUS.ERROR);
+                }
             } finally {
-                setLoading(false);
+                if (!cancelled) {
+                    setLoading(false);
+                }
             }
         };
 
         init();
 
         return () => {
-            if (socketRef.current) {
-                socketRef.current.close();
-            }
+            cancelled = true;
+            closeSocket();
         };
-    }, [roomId]);
+    }, [roomId, memberId]);
 
     useEffect(() => {
         if (messageEndRef.current) {
@@ -74,20 +152,23 @@ export default function ChatRoomPage() {
     }, [messages]);
 
     const sendMessage = () => {
-        if (!content.trim()) return;
+        const trimmedContent = content.trim();
+        if (!trimmedContent) return;
 
         if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-            alert("웹소켓 연결이 아직 열리지 않았습니다.");
+            setSocketError("웹소켓 연결이 아직 열리지 않았습니다.");
             return;
         }
 
         socketRef.current.send(
             JSON.stringify({
-                content,
+                type: "TALK",
+                content: trimmedContent,
             })
         );
 
         setContent("");
+        setSocketError("");
     };
 
     const handleKeyDown = (e) => {
@@ -119,6 +200,11 @@ export default function ChatRoomPage() {
                 {room?.roomName || `Room #${roomId}`}
             </h2>
 
+            <div style={{fontSize: 14, marginBottom: 12, color: socketStatus === SOCKET_STATUS.OPEN ? "#2f7d32" : "#9a5b00"}}>
+                {CONNECTION_LABEL[socketStatus]}
+                {socketError && <span style={{marginLeft: 8, color: "red"}}>{socketError}</span>}
+            </div>
+
             <div
                 style={{
                     border: "1px solid #ddd",
@@ -134,15 +220,16 @@ export default function ChatRoomPage() {
                 ) : (
                     messages.map((msg, idx) => (
                         <div
-                            key={`${msg.messageId ?? idx}-${idx}`}
+                            key={`${msg.messageId ?? msg.createdAt ?? idx}-${idx}`}
                             style={{
                                 marginBottom: 12,
                                 paddingBottom: 8,
                                 borderBottom: "1px solid #f1f1f1",
+                                color: isSystemMessage(msg) ? "#666" : "inherit",
                             }}
                         >
                             <div style={{fontWeight: "bold"}}>
-                                {msg.nickname} ({msg.senderId})
+                                {isSystemMessage(msg) ? "시스템" : `${msg.username || "알 수 없음"} (${msg.senderId})`}
                             </div>
                             <div>{msg.content}</div>
                             {msg.createdAt && (
@@ -164,7 +251,9 @@ export default function ChatRoomPage() {
                     placeholder="메시지 입력"
                     style={{flex: 1, padding: 12}}
                 />
-                <button onClick={sendMessage}>전송</button>
+                <button onClick={sendMessage} disabled={socketStatus !== SOCKET_STATUS.OPEN}>
+                    전송
+                </button>
             </div>
         </div>
     );

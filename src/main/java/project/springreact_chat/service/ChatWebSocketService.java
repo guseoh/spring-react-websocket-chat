@@ -12,28 +12,27 @@ import project.springreact_chat.domain.ChatRoom;
 import project.springreact_chat.domain.Member;
 import project.springreact_chat.dto.ChatSocketRequest;
 import project.springreact_chat.dto.ChatSocketResponse;
+import project.springreact_chat.dto.MessageType;
 import project.springreact_chat.dto.SessionInfo;
 import project.springreact_chat.repository.ChatMessageRepository;
 import project.springreact_chat.repository.ChatRoomParticipantRepository;
 import project.springreact_chat.repository.ChatRoomRepository;
 import project.springreact_chat.repository.MemberRepository;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * 핵심 서비스: 방별 세션 관리 + DB 저장 + 브로드캐스트
- * <p>
- * 순수 WebSocket에서는 서버가 클라이언트 세션을 직접 들고 있어야 한다.
- * 방별로 분리해서 전송하려면 roomId -> session set 같은 구조를 직접 관리해야 한다.
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ChatWebSocketService {
+
+    private static final int MAX_MESSAGE_LENGTH = 500;
 
     private final ChatRoomRepository chatRoomRepository;
     private final MemberRepository memberRepository;
@@ -41,54 +40,135 @@ public class ChatWebSocketService {
     private final ChatMessageRepository chatMessageRepository;
     private final ObjectMapper objectMapper;
 
-    // <roomId, 해당 방의 세션들>
     private final Map<Long, Set<WebSocketSession>> roomSessions = new ConcurrentHashMap<>();
-
-    // <sessionId, roomId/memberId?
     private final Map<String, SessionInfo> sessionInfoMap = new ConcurrentHashMap<>();
 
-
     public void connect(WebSocketSession session) {
-        Long roomId = (Long) session.getAttributes().get("roomId");
-        Long memberId = (Long) session.getAttributes().get("memberId");
+        SessionInfo sessionInfo = extractSessionInfo(session);
+        JoinContext context = validateJoin(sessionInfo.roomId(), sessionInfo.memberId());
 
-        log.info("웹소켓 연결 요청 - sessionId={}, roomId={}, memberId={}", session.getId(), roomId, memberId);
-
-        validateJoin(roomId, memberId);
-
-        roomSessions.computeIfAbsent(roomId, key -> ConcurrentHashMap.newKeySet())
+        roomSessions.computeIfAbsent(sessionInfo.roomId(), key -> ConcurrentHashMap.newKeySet())
                 .add(session);
+        sessionInfoMap.put(session.getId(), sessionInfo);
 
-        sessionInfoMap.put(session.getId(), new SessionInfo(roomId, memberId));
-
-        log.info("웹소켓 연결 완료 - sessionId={}, roomId={}, memberId={}", session.getId(), roomId, memberId);
+        log.info("웹소켓 연결 완료 - sessionId={}, roomId={}, memberId={}",
+                session.getId(), sessionInfo.roomId(), sessionInfo.memberId());
+        broadcast(sessionInfo.roomId(), ChatSocketResponse.system(
+                MessageType.ENTER,
+                sessionInfo.roomId(),
+                context.member(),
+                context.member().getUsername() + "님이 입장했습니다."
+        ));
     }
 
     @Transactional
-    public void handleMessage(WebSocketSession session, String payload) throws IOException {
-        log.info("메시지 처리 시작 - sessionId={}, payload={}", session.getId(), payload);
-
+    public void handleMessage(WebSocketSession session, String payload) {
         SessionInfo sessionInfo = sessionInfoMap.get(session.getId());
+        if (sessionInfo == null) {
+            log.warn("등록되지 않은 세션의 메시지 수신 - sessionId={}", session.getId());
+            sendError(session, "채팅방 연결 정보가 없습니다.");
+            closeSession(session, CloseStatus.POLICY_VIOLATION);
+            return;
+        }
+
+        ChatSocketRequest request;
+        try {
+            request = objectMapper.readValue(payload, ChatSocketRequest.class);
+        } catch (JacksonException e) {
+            log.warn("잘못된 JSON 메시지 수신 - sessionId={}, payload={}", session.getId(), payload);
+            sendError(session, "메시지 형식이 올바르지 않습니다.");
+            return;
+        }
+
+        if (request.getTypeOrDefault() != MessageType.TALK) {
+            log.warn("지원하지 않는 클라이언트 메시지 타입 - sessionId={}, type={}",
+                    session.getId(), request.getTypeOrDefault());
+            sendError(session, "클라이언트는 TALK 메시지만 보낼 수 있습니다.");
+            return;
+        }
+
+        String content = request.getTrimmedContent();
+        if (content.isBlank()) {
+            log.warn("빈 메시지 수신 - sessionId={}", session.getId());
+            sendError(session, "메시지를 입력해주세요.");
+            return;
+        }
+
+        if (content.length() > MAX_MESSAGE_LENGTH) {
+            log.warn("메시지 길이 초과 - sessionId={}, length={}", session.getId(), content.length());
+            sendError(session, "메시지는 500자 이하로 입력해주세요.");
+            return;
+        }
+
+        JoinContext context = validateJoin(sessionInfo.roomId(), sessionInfo.memberId());
+
+        ChatMessage chatMessage = ChatMessage.create(
+                content,
+                context.member(),
+                context.chatRoom()
+        );
+
+        ChatMessage saved = chatMessageRepository.save(chatMessage);
+        broadcast(sessionInfo.roomId(), ChatSocketResponse.talk(saved));
+    }
+
+    public void disconnect(WebSocketSession session) {
+        SessionInfo sessionInfo = sessionInfoMap.remove(session.getId());
 
         if (sessionInfo == null) {
-            if (session.isOpen()) {
-                session.close(CloseStatus.POLICY_VIOLATION);
-                log.warn("세션 종료 - sessionId={}", session.getId());
+            return;
+        }
+
+        Member member = memberRepository.findById(sessionInfo.memberId()).orElse(null);
+        Set<WebSocketSession> sessions = roomSessions.get(sessionInfo.roomId());
+        if (sessions != null) {
+            sessions.remove(session);
+            if (sessions.isEmpty()) {
+                roomSessions.remove(sessionInfo.roomId(), sessions);
             }
+        }
+
+        log.info("웹소켓 세션 정리 완료 - sessionId={}, roomId={}, memberId={}",
+                session.getId(), sessionInfo.roomId(), sessionInfo.memberId());
+
+        if (member != null) {
+            broadcast(sessionInfo.roomId(), ChatSocketResponse.system(
+                    MessageType.LEAVE,
+                    sessionInfo.roomId(),
+                    member,
+                    member.getUsername() + "님이 퇴장했습니다."
+            ));
+        }
+    }
+
+    private void broadcast(Long roomId, ChatSocketResponse response) {
+        Set<WebSocketSession> sessions = roomSessions.getOrDefault(roomId, Set.of());
+        if (sessions.isEmpty()) {
             return;
         }
 
-        ChatSocketRequest request = objectMapper.readValue(payload, ChatSocketRequest.class);
-
-        log.info("메시지 파싱 완료 - sessionId={}, content={}", session.getId(), request.getContent());
-
-        if (request.getContent() == null || request.getContent().isBlank()) {
-            log.warn("빈 메시지 수신 - sessionId={}", session.getId());
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(response);
+        } catch (JacksonException e) {
+            log.error("웹소켓 응답 직렬화 실패 - roomId={}, type={}", roomId, response.getType(), e);
             return;
         }
 
-        Long roomId = sessionInfo.roomId();
-        Long memberId = sessionInfo.memberId();
+        Set<WebSocketSession> failedSessions = new HashSet<>();
+        for (WebSocketSession webSocketSession : sessions) {
+            if (!sendMessage(webSocketSession, json)) {
+                failedSessions.add(webSocketSession);
+            }
+        }
+
+        failedSessions.forEach(this::removeSession);
+    }
+
+    private JoinContext validateJoin(Long roomId, Long memberId) {
+        if (roomId == null || memberId == null) {
+            throw new IllegalArgumentException("roomId, memberId가 필요합니다.");
+        }
 
         ChatRoom chatRoom = chatRoomRepository.findById(roomId)
                 .orElseThrow(() -> new IllegalArgumentException("채팅방이 존재하지 않습니다."));
@@ -96,27 +176,51 @@ public class ChatWebSocketService {
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new IllegalArgumentException("회원이 존재하지 않습니다."));
 
-        ChatMessage chatMessage = ChatMessage.create(
-                request.getContent(),
-                member,
-                chatRoom
-        );
+        boolean joined = chatRoomParticipantRepository.existsByChatRoomIdAndMemberId(roomId, memberId);
+        if (!joined) {
+            throw new IllegalArgumentException("해당 사용자는 채팅방 참가자가 아닙니다.");
+        }
 
-        ChatMessage saved = chatMessageRepository.save(chatMessage);
-
-        ChatSocketResponse response = ChatSocketResponse.builder()
-                .roomId(roomId)
-                .senderId(member.getId())
-                .username(member.getUsername())
-                .content(saved.getContent())
-                .createdAt(saved.getCreatedAt())
-                .build();
-        broadcast(roomId, response);
+        return new JoinContext(chatRoom, member);
     }
 
-    public void disconnect(WebSocketSession session) {
-        SessionInfo sessionInfo = sessionInfoMap.remove(session.getId());
+    private SessionInfo extractSessionInfo(WebSocketSession session) {
+        Long roomId = (Long) session.getAttributes().get("roomId");
+        Long memberId = (Long) session.getAttributes().get("memberId");
+        return new SessionInfo(roomId, memberId);
+    }
 
+    private void sendError(WebSocketSession session, String message) {
+        try {
+            String json = objectMapper.writeValueAsString(ChatSocketResponse.error(message));
+            sendMessage(session, json);
+        } catch (JacksonException e) {
+            log.error("웹소켓 에러 응답 직렬화 실패 - sessionId={}", session.getId(), e);
+        }
+    }
+
+    private boolean sendMessage(WebSocketSession session, String payload) {
+        if (!session.isOpen()) {
+            log.debug("닫힌 세션 전송 생략 - sessionId={}", session.getId());
+            return false;
+        }
+
+        try {
+            synchronized (session) {
+                if (!session.isOpen()) {
+                    return false;
+                }
+                session.sendMessage(new TextMessage(payload));
+            }
+            return true;
+        } catch (IOException | RuntimeException e) {
+            log.warn("웹소켓 메시지 전송 실패 - sessionId={}", session.getId(), e);
+            return false;
+        }
+    }
+
+    private void removeSession(WebSocketSession session) {
+        SessionInfo sessionInfo = sessionInfoMap.remove(session.getId());
         if (sessionInfo == null) {
             return;
         }
@@ -127,55 +231,23 @@ public class ChatWebSocketService {
         }
 
         sessions.remove(session);
-
         if (sessions.isEmpty()) {
-            roomSessions.remove(sessionInfo.roomId());
+            roomSessions.remove(sessionInfo.roomId(), sessions);
         }
     }
 
-    /*
-        순수 웹소켓에서의 브로드캐스트
-        1. 방에 연결된 세션 목록을 찾고
-        2. 그 세션들을 하나씩 돌면서
-        3. 같은 메시지를 전송
-     */
-    private void broadcast(Long roomId, ChatSocketResponse response) throws IOException {
-        Set<WebSocketSession> sessions = roomSessions.getOrDefault(roomId, Set.of());   // 1
-        String json = objectMapper.writeValueAsString(response);
+    private void closeSession(WebSocketSession session, CloseStatus status) {
+        if (!session.isOpen()) {
+            return;
+        }
 
-        for (WebSocketSession webSocketSession : sessions) {                            // 2
-            if (webSocketSession.isOpen()) {
-                webSocketSession.sendMessage(new TextMessage(json));                    // 3
-            }
+        try {
+            session.close(status);
+        } catch (IOException e) {
+            log.warn("웹소켓 세션 종료 실패 - sessionId={}", session.getId(), e);
         }
     }
 
-    private void validateJoin(Long roomId, Long memberId) {
-        if (roomId == null || memberId == null) {
-            throw new IllegalArgumentException("roomId, memberId가 필요합니다.");
-        }
-
-        if (!chatRoomRepository.existsById(roomId)) {
-            throw new IllegalArgumentException("채팅방이 존재하지 않습니다.");
-        }
-
-        if (!memberRepository.existsById(memberId)) {
-            throw new IllegalArgumentException("회원이 존재하지 않습니다.");
-        }
-
-        boolean joined = chatRoomParticipantRepository.existsByChatRoomIdAndMemberId(roomId, memberId);
-        if (!joined) {
-            throw new IllegalArgumentException("해당 사용자는 채팅방 참가자가 아닙니다.");
-        }
+    private record JoinContext(ChatRoom chatRoom, Member member) {
     }
 }
-
-/*
-    순수 WebSocket에서는 서버가 클라이언트 세션을 직접 들고 있어야 한다.
-    - 서버가 "누가 연결되어 있는지", "어느 세션에 메시지를 보낼지"를 직접 기억하고 관리해야 한다.
-    - 고수준 메시지 라우팅 기능을 기본으로 재공하지 않기 때문
-
-
-    computeIfAbsent (Map 기능)
-    - Key가 존재할 경우 기존 Value 리턴, 않을 경우 새로운 값을 저장한 후 반환
- */

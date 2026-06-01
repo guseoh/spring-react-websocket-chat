@@ -1,6 +1,7 @@
 package project.springreact_chat.config;
 
 import org.jspecify.annotations.Nullable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
@@ -13,25 +14,27 @@ import java.util.Map;
 @Component
 public class ChatHandshakeInterceptor implements HandshakeInterceptor {
     @Override
-    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
+    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) {
 
         if (!(request instanceof ServletServerHttpRequest servletRequest)) {
+            response.setStatusCode(HttpStatus.BAD_REQUEST);
             return false;
         }
 
         String roomId = servletRequest.getServletRequest().getParameter("roomId");
         String memberId = servletRequest.getServletRequest().getParameter("memberId");
 
-        if (roomId == null || memberId == null) {
+        if (roomId == null || roomId.isBlank() || memberId == null || memberId.isBlank()) {
+            response.setStatusCode(HttpStatus.BAD_REQUEST);
             return false;
         }
 
-        // attributes에 넣은 값은 나중에 WebSocket 세션에서 꺼낼 수 있다.
         try {
             attributes.put("roomId", Long.parseLong(roomId));
             attributes.put("memberId", Long.parseLong(memberId));
             return true;
         } catch (NumberFormatException e) {
+            response.setStatusCode(HttpStatus.BAD_REQUEST);
             return false;
         }
     }
@@ -41,11 +44,3 @@ public class ChatHandshakeInterceptor implements HandshakeInterceptor {
 
     }
 }
-
-
-/*
-    HandshakeInterceptor
-    - WebSocket 연결이 실제로 맺어지기 직전에 가로채서 검사하거나 값을 저장하는 역할
-    - HTTP 요청으로 WebSocket 연결을 시작할 때 연결을 허용할지 / 막을지 / 필요한 정보 저장할지 결정하는 도구
-
- */

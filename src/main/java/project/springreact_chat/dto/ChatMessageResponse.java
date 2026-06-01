@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 @Builder
 public class ChatMessageResponse {
 
+    private MessageType type;
     private Long messageId;
     private Long senderId;
     private Long roomId;
@@ -21,6 +22,7 @@ public class ChatMessageResponse {
     //todo: 수정 필요
     public static ChatMessageResponse from(ChatMessage chatMessage) {
         return ChatMessageResponse.builder()
+                .type(MessageType.TALK)
                 .messageId(chatMessage.getId())
                 .senderId(chatMessage.getSender().getId())
                 .roomId(chatMessage.getChatRoom().getId())

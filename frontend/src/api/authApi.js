@@ -1,7 +1,7 @@
-const BASE_URL = "http://localhost:8080";
+import {API_BASE_URL} from "../config";
 
 export async function signup(request) {
-    const response = await fetch(`${BASE_URL}/signup`, {
+    const response = await fetch(`${API_BASE_URL}/signup`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -10,15 +10,15 @@ export async function signup(request) {
     });
 
     if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "회원가입에 실패했습니다.");
+        const error = await readError(response, "회원가입에 실패했습니다.");
+        throw new Error(error);
     }
 
     return await response.json();
 }
 
 export async function login({ email, password }) {
-    const response = await fetch(`${BASE_URL}/login`, {
+    const response = await fetch(`${API_BASE_URL}/login`, {
         method: "POST",
         headers: {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -36,7 +36,7 @@ export async function login({ email, password }) {
 }
 
 export async function getMe() {
-    const response = await fetch(`${BASE_URL}/api/auth/me`, {
+    const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
         method: "GET",
         credentials: "include",
     });
@@ -53,12 +53,21 @@ export async function getMe() {
 }
 
 export async function logout() {
-    const response = await fetch(`${BASE_URL}/logout`, {
+    const response = await fetch(`${API_BASE_URL}/logout`, {
         method: "POST",
         credentials: "include",
     });
 
     if (!response.ok) {
         throw new Error("로그아웃에 실패했습니다.");
+    }
+}
+
+async function readError(response, fallbackMessage) {
+    try {
+        const data = await response.json();
+        return data.message || fallbackMessage;
+    } catch {
+        return fallbackMessage;
     }
 }

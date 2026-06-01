@@ -31,14 +31,15 @@ export default function ChatRoomListPage() {
     const handleCreateRoom = async (e) => {
         e.preventDefault();
 
-        if (!roomName.trim()) {
+        const trimmedRoomName = roomName.trim();
+        if (!trimmedRoomName) {
             alert("채팅방 이름을 입력해주세요.");
             return;
         }
 
         try {
             const createdRoom = await createChatRoom({
-                roomName,
+                roomName: trimmedRoomName,
                 roomType,
             });
 

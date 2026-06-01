@@ -13,15 +13,14 @@ public class MemberResponse {
     private Long id;
     private String email;
     private String username;
-    private String password;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
     public static MemberResponse from(Member member) {
         return MemberResponse.builder()
                 .id(member.getId())
+                .email(member.getEmail())
                 .username(member.getUsername())
-                .password(member.getPassword())
                 .createdAt(member.getCreatedAt())
                 .updatedAt(member.getUpdatedAt())
                 .build();

@@ -7,7 +7,7 @@ export default function SignupPage() {
 
     const [form, setForm] = useState({
         email: "",
-        nickname: "",
+        username: "",
         password: "",
     });
 
@@ -53,9 +53,9 @@ export default function SignupPage() {
                     />
                     <input
                         type="text"
-                        name="nickname"
+                        name="username"
                         placeholder="닉네임"
-                        value={form.nickname}
+                        value={form.username}
                         onChange={handleChange}
                     />
                     <input
